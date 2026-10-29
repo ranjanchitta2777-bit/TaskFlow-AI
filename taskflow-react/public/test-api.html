@@ -1,0 +1,32 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TaskFlow API Test</title>
+</head>
+<body>
+  <h1>TaskFlow AI API Test</h1>
+  <button id="load">Load Tasks</button>
+  <pre id="output">Click the button to load tasks.</pre>
+
+  <script>
+    const output = document.getElementById("output");
+
+    document.getElementById("load").addEventListener("click", async () => {
+      try {
+        const response = await fetch("http://127.0.0.1:8000/tasks");
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const tasks = await response.json();
+        output.textContent = JSON.stringify(tasks, null, 2);
+      } catch (error) {
+        output.textContent = error.message;
+      }
+    });
+  </script>
+</body>
+</html>
