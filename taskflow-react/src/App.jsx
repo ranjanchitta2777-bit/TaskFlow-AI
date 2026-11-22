@@ -5,6 +5,7 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  breakdownTask,
 } from "./api";
 import "./index.css";
 
@@ -17,7 +18,13 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [editingId, setEditingId] = useState(null);
+
+  // AI feature states
+  const [aiTask, setAiTask] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState([]);
 
   async function loadTasks() {
     setLoading(true);
@@ -27,7 +34,9 @@ function App() {
       const data = await getTasks();
       setTasks(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError("Could not load tasks. Check that the backend and database are running.");
+      setError(
+        "Could not load tasks. Check that the backend and database are running."
+      );
       console.error(err);
     } finally {
       setLoading(false);
@@ -38,6 +47,7 @@ function App() {
     loadTasks();
   }, []);
 
+  // Create a normal task
   async function handleAddTask(event) {
     event.preventDefault();
 
@@ -53,18 +63,14 @@ function App() {
       const savedTask = await createTask({
         title: title.trim(),
         priority,
-        completed: false,
       });
 
-      // The backend must return the saved task.
       if (!savedTask || savedTask.id == null) {
         await loadTasks();
-        setTitle("");
-        setPriority("Medium");
-        return;
+      } else {
+        setTasks((previous) => [...previous, savedTask]);
       }
 
-      setTasks((previous) => [...previous, savedTask]);
       setTitle("");
       setPriority("Medium");
     } catch (err) {
@@ -75,6 +81,7 @@ function App() {
     }
   }
 
+  // Complete or undo a task
   async function handleToggle(task) {
     setError("");
 
@@ -100,6 +107,7 @@ function App() {
     }
   }
 
+  // Edit a task
   async function handleEdit(task) {
     const newTitle = window.prompt("Edit task title:", task.title);
 
@@ -131,6 +139,7 @@ function App() {
     }
   }
 
+  // Delete a task
   async function handleDelete(id) {
     if (!window.confirm("Are you sure you want to delete this task?")) {
       return;
@@ -150,6 +159,96 @@ function App() {
     }
   }
 
+  // Generate subtasks using AI
+  async function handleAIBreakdown(event) {
+    event.preventDefault();
+
+    if (!aiTask.trim()) {
+      setAiError("Please enter a task for AI to break down.");
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError("");
+    setSuggestions([]);
+    setSelectedSuggestions([]);
+
+    try {
+      const data = await breakdownTask(aiTask.trim());
+
+      const generatedTasks = data.subtasks
+        .split("\n")
+        .map((line) =>
+          line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()
+        )
+        .filter(Boolean);
+
+      if (generatedTasks.length === 0) {
+        throw new Error("The AI did not generate any subtasks.");
+      }
+
+      setSuggestions(generatedTasks);
+      setSelectedSuggestions(generatedTasks.map((_, index) => index));
+    } catch (err) {
+      setAiError(
+        err.message || "Could not generate subtasks. Please try again."
+      );
+      console.error(err);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  // Select or deselect an AI suggestion
+  function toggleSuggestion(index) {
+    setSelectedSuggestions((previous) =>
+      previous.includes(index)
+        ? previous.filter((item) => item !== index)
+        : [...previous, index]
+    );
+  }
+
+  // Save selected AI suggestions into MySQL
+  async function handleAddAISuggestions() {
+    const selectedTasks = suggestions.filter((_, index) =>
+      selectedSuggestions.includes(index)
+    );
+
+    if (selectedTasks.length === 0) {
+      setAiError("Please select at least one subtask.");
+      return;
+    }
+
+    setSaving(true);
+    setAiError("");
+
+    try {
+      const savedTasks = await Promise.all(
+        selectedTasks.map((taskTitle) =>
+          createTask({
+            title: taskTitle,
+            priority: "Medium",
+          })
+        )
+      );
+
+      setTasks((previous) => [...previous, ...savedTasks]);
+
+      setSuggestions([]);
+      setSelectedSuggestions([]);
+      setAiTask("");
+    } catch (err) {
+      setAiError(
+        "Could not save all AI subtasks. Please check your tasks and try again."
+      );
+      console.error(err);
+      await loadTasks();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Search and filter tasks
   const visibleTasks = tasks.filter((task) => {
     const matchesSearch = (task.title || "")
       .toLowerCase()
@@ -171,7 +270,7 @@ function App() {
     <main className="app-container">
       <header className="app-header">
         <h1>TaskFlow AI</h1>
-        <p>Organize your tasks and track your progress.</p>
+        <p>Organize your tasks and let AI help you plan smarter.</p>
       </header>
 
       <section className="task-stats">
@@ -191,6 +290,70 @@ function App() {
         </div>
       </section>
 
+      {/* AI Task Breakdown */}
+      <section className="ai-section">
+        <h2>AI Task Breakdown</h2>
+        <p>
+          Enter a big task and let AI divide it into smaller,
+          actionable steps.
+        </p>
+
+        <form onSubmit={handleAIBreakdown}>
+          <input
+            type="text"
+            placeholder="Example: Prepare for a Java interview"
+            value={aiTask}
+            onChange={(event) => setAiTask(event.target.value)}
+            maxLength={200}
+            required
+          />
+
+          <button type="submit" disabled={aiLoading}>
+            {aiLoading ? "Generating..." : "✨ Generate with AI"}
+          </button>
+        </form>
+
+        {aiLoading && <p>AI is thinking. Please wait...</p>}
+
+        {aiError && (
+          <div className="error-message" role="alert">
+            {aiError}
+            <button type="button" onClick={() => setAiError("")}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {suggestions.length > 0 && (
+          <div className="ai-results">
+            <h3>AI-generated subtasks</h3>
+            <p>Select the subtasks you want to add to your task list.</p>
+
+            {suggestions.map((suggestion, index) => (
+              <label className="ai-suggestion" key={index}>
+                <input
+                  type="checkbox"
+                  checked={selectedSuggestions.includes(index)}
+                  onChange={() => toggleSuggestion(index)}
+                />
+                <span>{suggestion}</span>
+              </label>
+            ))}
+
+            <button
+              type="button"
+              onClick={handleAddAISuggestions}
+              disabled={saving || selectedSuggestions.length === 0}
+            >
+              {saving
+                ? "Adding..."
+                : `Add Selected Tasks (${selectedSuggestions.length})`}
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Normal task form */}
       <form className="task-form" onSubmit={handleAddTask}>
         <input
           type="text"
@@ -224,6 +387,7 @@ function App() {
         </div>
       )}
 
+      {/* Search and filters */}
       <section className="task-controls">
         <input
           type="search"
@@ -242,6 +406,7 @@ function App() {
         </select>
       </section>
 
+      {/* Task list */}
       <section className="task-list">
         <h2>Your Tasks</h2>
 

@@ -42,3 +42,10 @@ export function deleteTask(id) {
     method: "DELETE",
   });
 }
+export function breakdownTask(task) {
+  return request("/ai/breakdown", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task }),
+  });
+}
